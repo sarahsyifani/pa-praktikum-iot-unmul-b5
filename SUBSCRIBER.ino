@@ -1,19 +1,17 @@
+#define BLYNK_TEMPLATE_ID "TMPL6tyzY65kZ"
+#define BLYNK_TEMPLATE_NAME "ProjekIotT"
+
 #include <Servo.h>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include <BlynkSimpleEsp8266.h>
+#include <BlynkSimpleEsp8266.h> // Tambahkan library Blynk
 
-// Update these with values suitable for your network.
-const char* ssid = "gelombang cinta"; // Isi dengan SSID WiFi Anda
-const char* password = "rindukoe"; // Isi dengan password WiFi Anda
-const char* mqtt_server = "broker.emqx.io"; // broker gratisan
-
-// Definisi untuk Blynk Template ID, Template Name, dan Auth Token
-#define BLYNK_TEMPLATE_ID "TMPL6tyzY65kZ"
-#define BLYNK_TEMPLATE_NAME "ProjekIotT"
-#define BLYNK_AUTH_TOKEN "OaGIV5Pdntxyyh9yqaoRraELABm9FdGm"
+// Update ini dengan nilai yang sesuai untuk jaringan Anda.
+const char* ssid = "amin";
+const char* password = "12345678";
+const char* mqtt_server = "broker.emqx.io";  // broker gratisan
 
 #define SS_PIN 4
 #define RST_PIN 5
@@ -22,6 +20,8 @@ Servo myServo;
 int LED_G = D0;
 int LED_R = D8;
 int BUZZER = D3;  // Pin buzzer
+
+char auth[] = "OaGIV5Pdntxyyh9yqaoRraELABm9FdGm"; // Masukkan token autentikasi Blynk
 
 unsigned long previousMillis = 0;
 const long interval = 1000;  // Waktu interval dalam milidetik
@@ -34,100 +34,78 @@ bool isBlocked = false;
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+bool buzzerEnabled = true;  // Flag untuk menyimpan status buzzer
+
+BLYNK_WRITE(V0) {  // Pin virtual V0 untuk kontrol buzzer
+  buzzerEnabled = param.asInt();  // Update status buzzer berdasarkan switch
+}
+
 void setup() {
   Serial.begin(9600);
   pinMode(LED_G, OUTPUT);
   pinMode(LED_R, OUTPUT);
   pinMode(BUZZER, OUTPUT);  // Inisialisasi pin buzzer
-  myServo.attach(2); // Menggunakan pin D2 untuk servo
+  myServo.attach(2);        // Menggunakan pin D2 untuk servo
   myServo.write(0);
   SPI.begin();
   rfid.PCD_Init();
   memset(lastUID, 0, sizeof(lastUID));
 
-  // Inisialisasi koneksi WiFi
+  Serial.println();
+  Serial.print("Menghubungkan ke ");
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  
-  // Tunggu hingga terhubung ke WiFi
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
 
-  // Mulai koneksi Blynk
-  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, password, BLYNK_TEMPLATE_ID, true);
+  randomSeed(micros());
 
-  // Mulai koneksi MQTT
+  Serial.println("");
+  Serial.println("WiFi terhubung");
+  Serial.println("Alamat IP: ");
+  Serial.println(WiFi.localIP());
+
+  // Koneksi ke server Blynk
+  Blynk.begin(auth, ssid, password);
+
   client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
 }
 
-void loop() {
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-    checkForCard();
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Pesan diterima [");
+  Serial.print(topic);
+  Serial.print("] ");
+  String user = "";  // variabel untuk menyimpan data yang berbentuk array char
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+    user += (char)payload[i];  // menyimpan kumpulan char ke dalam string
   }
-
-  if (!client.connected()) {
-    reconnect();
-  }
-
-  client.loop();
-  Blynk.run();
-}
-
-void checkForCard() {
-  if (!rfid.PICC_IsNewCardPresent()) {
-    isCardPresent = false;
-    return;
-  }
-  if (!rfid.PICC_ReadCardSerial()) {
-    isCardPresent = false;
-    return;
-  }
-
-  // Simpan UID kartu yang baru
-  bool isNewCard = memcmp(rfid.uid.uidByte, lastUID, rfid.uid.size) != 0;
-
-  // Jika kartu yang baru berbeda dengan yang terakhir, simpan UID baru
-  if (isNewCard || !isCardPresent) {
-    memcpy(lastUID, rfid.uid.uidByte, rfid.uid.size);
-    isCardPresent = true;
-    handleCard();
-  }
-}
-
-void handleCard() {
-  Serial.print("UID tag : ");
-  String content = "";
-  for (byte i = 0; i < rfid.uid.size; i++) {
-    Serial.print(rfid.uid.uidByte[i] < 0x10 ? " 0 " : " ");
-    Serial.print(rfid.uid.uidByte[i], DEC);
-    content.concat(String(rfid.uid.uidByte[i] < 0x10 ? "0" : " "));
-    content.concat(String(rfid.uid.uidByte[i], DEC));
-  }
-  Serial.println();
-  Serial.print("Pesan : ");
-  content.toUpperCase();
-
-  if (content.substring(1) == "195 178 139 166") {
+  if (user.substring(1) == "195 178 139 166") {  // pengkondisian
     Serial.println("Hudzaifah");
     Serial.println("---AKSES DITERIMA---");
     Serial.println();
     digitalWrite(LED_G, HIGH);
-    digitalWrite(BUZZER, LOW); // Matikan buzzer
+    Blynk.virtualWrite(V1, HIGH);
+    digitalWrite(BUZZER, LOW);  // Matikan buzzer
     myServo.write(180);
     delay(3000);
     myServo.write(0);
     delay(1000);
     digitalWrite(LED_G, LOW);
-    failCount = 0; // Reset fail count on successful access
-    isBlocked = false; // Unblock card after successful access
+    failCount = 0;      // Reset fail count pada akses yang berhasil
+    isBlocked = false;  // Unblock kartu setelah akses yang berhasil
 
-    // Mengirim status akses diterima ke Blynk
-    Blynk.virtualWrite(V1, HIGH); // Lampu hijau
-    Blynk.virtualWrite(V2, LOW);  // Lampu merah
-    Blynk.virtualWrite(V3, LOW);  // Status blokir
+    // Kontrol tampilan di Blynk
+    delay(1000);
+    Blynk.virtualWrite(V1, LOW);
+    Blynk.virtualWrite(V2, LOW);  // Lampu merah mati
+    Blynk.virtualWrite(V3, LOW);  // Lampu merah saat terblokir mati
   } else {
     failCount++;
     Serial.println("Kartu Gagal");
@@ -137,49 +115,75 @@ void handleCard() {
       isBlocked = true;
       Serial.println("---KARTU DIBLOKIR---");
       digitalWrite(LED_R, HIGH);
-      for (int i = 0; i < 4; i++) {
-        digitalWrite(BUZZER, HIGH);
-        delay(200);
-        digitalWrite(BUZZER, LOW);
-        delay(200);
-        digitalWrite(BUZZER, HIGH);
-        delay(200);
-        digitalWrite(BUZZER, LOW);
-        delay(200);
+      Blynk.virtualWrite(V3, HIGH);
+      if (buzzerEnabled) {  // Periksa jika buzzer diaktifkan
+        for (int i = 0; i < 4; i++) {
+          digitalWrite(BUZZER, HIGH);
+          delay(200);
+          digitalWrite(BUZZER, LOW);
+          delay(200);
+          digitalWrite(BUZZER, HIGH);
+          delay(200);
+          digitalWrite(BUZZER, LOW);
+          delay(200);
+        }
       }
       digitalWrite(LED_R, LOW);
+
+      // Kontrol tampilan di Blynk
+      Blynk.virtualWrite(V1, LOW);  // Lampu hijau mati
+      Blynk.virtualWrite(V2, LOW); // Lampu merah menyala
+      
+      delay(500); // Lampu merah saat terblokir menyala
+      Blynk.virtualWrite(V2, LOW);
+      Blynk.virtualWrite(V3, LOW);
     } else {
       digitalWrite(LED_R, HIGH);
-      digitalWrite(BUZZER, HIGH); // Hidupkan buzzer
+      if (buzzerEnabled) {  // Periksa jika buzzer diaktifkan
+        digitalWrite(BUZZER, HIGH);
+      }
+      Blynk.virtualWrite(V2, HIGH);  // Hidupkan buzzer
       delay(1000);
       digitalWrite(LED_R, LOW);
-      digitalWrite(BUZZER, LOW); // Matikan buzzer
-    }
+      digitalWrite(BUZZER, LOW);  // Matikan buzzer
 
-    // Mengirim status akses ditolak ke Blynk
-    Blynk.virtualWrite(V1, LOW);  // Lampu hijau
-    Blynk.virtualWrite(V2, HIGH); // Lampu merah
-    Blynk.virtualWrite(V3, LOW);  // Status blokir
+      // Kontrol tampilan di Blynk
+      Blynk.virtualWrite(V1, LOW);  // Lampu hijau mati
+      delay(1000);
+      Blynk.virtualWrite(V2, LOW);
+      Blynk.virtualWrite(V3, LOW);  // Lampu merah saat terblokir mati
+    }
   }
 }
 
 void reconnect() {
-  // Loop until we're reconnected
+  // Loop hingga kita terhubung kembali
   while (!client.connected()) {
-    Serial.print("Attempting MQTT connection...");
-    // Create a random client ID
+    Serial.print("Mencoba koneksi MQTT...");
+    // Buat ID klien acak
     String clientId = "PAiotSubscriber";
     clientId += String(random(0xffff), HEX);
-    // Attempt to connect
+    // Coba untuk terhubung
     if (client.connect(clientId.c_str())) {
-      Serial.println("connected");
+      Serial.println("terhubung");
       client.subscribe("PA/RFID");
     } else {
-      Serial.print("failed, rc=");
+      Serial.print("gagal, rc=");
       Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-      // Wait 5 seconds before retrying
+      Serial.println(" coba lagi dalam 5 detik");
+      // Tunggu 5 detik sebelum mencoba lagi
       delay(5000);
     }
   }
+}
+
+void loop() {
+  // Blynk
+  Blynk.run();
+
+  if (!client.connected()) {
+    reconnect();
+  }
+
+  client.loop();
 }
